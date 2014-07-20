@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -94,17 +95,27 @@ namespace BPraserDSL
         public static readonly BParser<byte> Byte = ByteOf(_ => true);
         public static BParser<byte> ByteOf(byte expect) { return ByteOf(val=>expect == val); }
 
-        public static BParser<UInt16> WordOf(UInt16 expect) {
-            byte highExpect = (byte)(0xFF  & (expect >> 8));
-            byte lowExpect =  (byte)(0xFF & expect);
-            return from firstVal in ByteOf(highExpect)
-                   from secondVal in ByteOf(lowExpect)
-                   select expect;
-        }
+
         public static readonly BParser<UInt16> Word =
             from firstByte in Byte
             from secondByte in Byte
             select (UInt16) ((firstByte << 8) | secondByte);
+
+        public static BParser<UInt16> WordOf(Predicate<UInt16> predict)
+        {
+            return input =>
+                {
+                    var res = Word(input);
+                    if (!res.WasSuccess || !predict(res.Value))
+                        return Result<UInt16>.Fail(input);
+                    return Result<UInt16>.Success(res.Value, res.Reminder);
+                };
+        }
+
+        public static BParser<UInt16> WordOf(UInt16 expect)
+        {
+            return WordOf(val => expect == val);
+        }
 
 
         public static BParser<T> Or<T>(this BParser<T> first, BParser<T> second)
@@ -149,16 +160,84 @@ namespace BPraserDSL
             };
         }
 
+        public static BParser<IEnumerable<T>> Times<T>(this BParser<T> parser, int num)
+        {
+            return input =>
+            {
+                var reminder = input;
+                var resultAll = new List<T>();
+                for (int i = 0; i < num; i++)
+                {
+                    var resultOne = parser(reminder);
+                    if (!resultOne.WasSuccess)
+                        return Result<IEnumerable<T>>.Fail(reminder);
+
+                    resultAll.Add(resultOne.Value);
+
+                    reminder = resultOne.Reminder;
+                    resultOne = parser(reminder);
+                }
+                return Result<IEnumerable<T>>.Success(resultAll, reminder);
+            };
+        }
 
     }
 
 
+    static class Extension
+    {
+    }
 
     class Program
     {
+        static readonly BParser<UInt16> Start = from h1 in BParse.ByteOf(0xFF)
+                    from h2 in BParse.ByteOf(0xD8)
+                    select (UInt16)0xFFD8;
+
+
+        static readonly BParser<Dictionary<string, object>> SOSSegment =
+            from segType in BParse.WordOf(0xFFDA)
+            from len in BParse.Word
+            from data in BParse.Byte.Times(len - 2)
+            select new Dictionary<string, object>() { { "Type", segType }, { "Length", len } };
+
+
+        static readonly BParser<Dictionary<string, object>> GenericSegment =
+            from segType in BParse.WordOf(val => val!= 0xFFDA)
+            from len in BParse.Word
+            from data in BParse.Byte.Times(len-2)
+            select new Dictionary<string, object>() { {"Type", segType}, {"Length", len} };
+
+        static readonly BParser<IEnumerable<Dictionary<String, object>>>
+            JpegParser = from startMarker in Start
+                         from segs in GenericSegment.Many()
+                         from sosseg in SOSSegment
+                         select Add(segs, sosseg);
+
+        public static IEnumerable<T> Add<T>(IEnumerable<T> source, T item)
+        {
+            foreach(var val in source)
+                yield return val;
+            yield return item;
+        }
+
         static void Main(string[] args)
         {
+            using (var reader = new FileStream("test.jpg", FileMode.Open))
+            using (var binReader = new BinaryReader(reader))
+            {
+                var bytes = binReader.ReadBytes((int)reader.Length).ToList();
 
+                var res = JpegParser(new Input(bytes));
+                if (!res.WasSuccess)
+                    throw new Exception("parse fail");
+
+                foreach (var seg in res.Value)
+                {
+                    Console.WriteLine(String.Format("Type={0:X}", seg["Type"]));
+                    Console.WriteLine(String.Format("Len={0}", seg["Length"]));
+                }
+            }
         }
     }
 }
