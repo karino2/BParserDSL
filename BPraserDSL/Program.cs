@@ -190,9 +190,10 @@ namespace BPraserDSL
 
     class Program
     {
-        static readonly BParser<UInt16> Start = from h1 in BParse.ByteOf(0xFF)
-                    from h2 in BParse.ByteOf(0xD8)
-                    select (UInt16)0xFFD8;
+        static readonly BParser<UInt16> Start = 
+            from h1 in BParse.ByteOf(0xFF)
+            from h2 in BParse.ByteOf(0xD8)
+            select (UInt16)0xFFD8;
 
 
         static readonly BParser<Dictionary<string, object>> SOSSegment =
