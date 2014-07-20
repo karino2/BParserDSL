@@ -1,0 +1,5 @@
+*.suo
+BPraserDSL/bin/
+BPraserDSL/obj/
+BparserDSLTestProject/bin/
+BparserDSLTestProject/obj/
